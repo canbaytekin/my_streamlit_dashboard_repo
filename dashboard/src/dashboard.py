@@ -446,10 +446,10 @@ with tab1:
                 in_delivery,
                 in_return,
                 sales_last_month,
-                sales_target,
-                stock_deficit,
+                sales_last_month * {sales_target_multiplier} AS sales_target,
+                CEIL((sales_last_month * {sales_target_multiplier}) - current_stock) AS stock_deficit,
                 CASE 
-                    WHEN current_stock < sales_target THEN TRUE
+                    WHEN current_stock < (sales_last_month * {sales_target_multiplier}) THEN TRUE
                     ELSE FALSE
                 END AS needs_restock
             FROM public.product_restock
