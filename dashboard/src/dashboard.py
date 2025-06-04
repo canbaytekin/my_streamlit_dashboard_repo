@@ -343,11 +343,11 @@ with tab1:
                 COALESCE(lms.last_month_amount, 0) AS amount_last_month,
                 COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier} AS sales_target,
                 CASE 
-                    WHEN cs.current_stock < (COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) THEN TRUE
+                    WHEN cs.current_stock + cs.in_return < (COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) THEN TRUE
                     ELSE FALSE
                 END AS needs_restock,
                 CEIL((COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return)) AS stock_deficit,
-                (COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) - cs.current_stock AS sort_key
+                (COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return) AS sort_key
             FROM current_stock cs
             LEFT JOIN current_month_sales cms
                 ON cs.warehouse_name = cms.warehouse_name AND cs.nm_id = cms.nm_id AND cs.tech_size = cms.tech_size
@@ -447,7 +447,7 @@ with tab1:
                 in_return,
                 sales_last_month,
                 sales_last_month * {sales_target_multiplier} AS sales_target,
-                CEIL((sales_last_month * {sales_target_multiplier}) - current_stock) AS stock_deficit,
+                CEIL((sales_last_month * {sales_target_multiplier}) - (current_stock + in_return)) AS stock_deficit,
                 CASE 
                     WHEN current_stock < (sales_last_month * {sales_target_multiplier}) THEN TRUE
                     ELSE FALSE
