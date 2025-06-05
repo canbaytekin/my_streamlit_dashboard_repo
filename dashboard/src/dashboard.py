@@ -77,7 +77,22 @@ translations = {
         "sale_order_ratio_label": "Sale/Order Ratio",
         "ratio_label": "Ratio",
         "metric_label": "Metric",
-        "ratio_data_missing": "Sale_Order_Ratio data not available to display trend."
+        "ratio_data_missing": "Sale_Order_Ratio data not available to display trend.",
+        "shipment_tab": "Shipment Information",
+        "shipment_title": "Warehouse Shipment Analysis",
+        "avg_processing_days": "Avg. Processing Days",
+        "max_processing_days": "Max Processing Days",
+        "shipment_count": "Shipment Count",
+        "warehouse_performance": "Warehouse Performance",
+        "processing_time": "Processing Time (Days)",
+        "efficiency_rating": "Efficiency Rating",
+        "restocking_priorities": "Restocking Priorities",
+        "priority_score": "Priority Score",
+        "product_id": "Product ID",
+        "processing_speed": "Processing Speed",
+        "no_shipment_data": "No shipment data available.",
+        "efficiency_distribution": "Efficiency Rating Distribution",
+        "rating": "Rating"
     },
     "Russian": {
         "page_title": "Панель аналитики склада",
@@ -137,7 +152,22 @@ translations = {
         "sale_order_ratio_label": "Отношение продаж к заказам",
         "ratio_label": "Отношение",
         "metric_label": "Показатель",
-        "ratio_data_missing": "Данные для расчета отношения продаж к заказам отсутствуют."
+        "ratio_data_missing": "Данные для расчета отношения продаж к заказам отсутствуют.",
+        "shipment_tab": "Информация о доставке",
+        "shipment_title": "Анализ доставки на склады",
+        "avg_processing_days": "Сред. время обработки (дни)",
+        "max_processing_days": "Макс. время обработки (дни)",
+        "shipment_count": "Кол-во поставок",
+        "warehouse_performance": "Производительность складов",
+        "processing_time": "Время обработки (дни)",
+        "efficiency_rating": "Рейтинг эффективности",
+        "restocking_priorities": "Приоритеты пополнения",
+        "priority_score": "Приоритетный балл",
+        "product_id": "ID товара",
+        "processing_speed": "Скорость обработки",
+        "no_shipment_data": "Данные о поставках отсутствуют.",
+        "efficiency_distribution": "Распределение рейтинга эффективности",
+        "rating": "Рейтинг"
     }
 }
 
@@ -214,7 +244,8 @@ with col1:
 # Create tabs
 tab1_title = t["stock_deficit_overview"] # Or a more specific title for the first tab if needed
 tab2_title = t["sales_orders_tab"]
-tab1, tab2 = st.tabs([tab1_title, tab2_title])
+tab3_title = t["shipment_tab"]
+tab1, tab2, tab3 = st.tabs([tab1_title, tab2_title, tab3_title])
 
 with tab1:
     # Add refresh button at the top
@@ -899,3 +930,215 @@ with tab2:
 
         # Display the dataframe with all columns including Sale_Order_Ratio, if needed for debugging or full view
         st.dataframe(sales_orders_df, use_container_width=True)
+
+with tab3:
+    st.header(t["shipment_title"])
+    
+    @st.cache_data(ttl=300)  # Cache expires after 5 minutes
+    def load_warehouse_performance_data():
+        try:
+            # Get connection parameters from secrets
+            db_params = get_db_connection_params()
+            
+            conn = psycopg2.connect(
+                host=db_params["host"],
+                database=db_params["database"],
+                user=db_params["user"],
+                password=db_params["password"],
+                port=db_params["port"]
+            )
+            
+            # Query for warehouse performance metrics
+            query = """
+                SELECT 
+                    warehouse_name,
+                    avg_days_to_accept,
+                    min_days_to_accept,
+                    max_days_to_accept,
+                    shipment_count
+                FROM public.recent_warehouse_performance
+                ORDER BY avg_days_to_accept ASC
+            """
+            
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+                cursor.execute(query)
+                columns = [desc[0] for desc in cursor.description]
+                data = cursor.fetchall()
+                performance_df = pd.DataFrame(data, columns=columns)
+            
+            # Query for efficiency distribution
+            query_efficiency = """
+                SELECT 
+                    processing_speed_rating as efficiency_rating,
+                    COUNT(*) as warehouse_count
+                FROM public.restocking_efficiency
+                GROUP BY processing_speed_rating
+                ORDER BY CASE 
+                    WHEN processing_speed_rating = 'Excellent' THEN 1
+                    WHEN processing_speed_rating = 'Good' THEN 2
+                    WHEN processing_speed_rating = 'Average' THEN 3
+                    WHEN processing_speed_rating = 'Below Average' THEN 4
+                    WHEN processing_speed_rating = 'Poor' THEN 5
+                    ELSE 6
+                END
+            """
+            
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+                cursor.execute(query_efficiency)
+                columns = [desc[0] for desc in cursor.description]
+                data = cursor.fetchall()
+                efficiency_df = pd.DataFrame(data, columns=columns)
+            
+            # Query for product shipping analysis with priority
+            query_priorities = """
+                SELECT 
+                    nm_id as product_id,
+                    processing_speed,
+                    priority as priority_score,
+                    warehouse_name
+                FROM public.product_shipping_analysis
+                ORDER BY priority DESC
+                LIMIT 15
+            """
+            
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+                cursor.execute(query_priorities)
+                columns = [desc[0] for desc in cursor.description]
+                data = cursor.fetchall()
+                priorities_df = pd.DataFrame(data, columns=columns)
+            
+            conn.close()
+            return performance_df, efficiency_df, priorities_df
+            
+        except Exception as e:
+            st.error(f"Error loading shipment data: {e}")
+            return (pd.DataFrame(columns=["warehouse_name", "avg_days_to_accept", "min_days_to_accept", 
+                                         "max_days_to_accept", "shipment_count"]),
+                   pd.DataFrame(columns=["efficiency_rating", "warehouse_count"]),
+                   pd.DataFrame(columns=["product_id", "processing_speed", "priority_score", "warehouse_name"]))
+
+    # Load the shipment data
+    performance_df, efficiency_df, priorities_df = load_warehouse_performance_data()
+    
+    if performance_df.empty:
+        st.info(t["no_shipment_data"])
+    else:
+        # Visualization 1: Warehouse Performance Metrics
+        st.subheader(t["warehouse_performance"])
+        
+        # Ensure numeric data types for visualization
+        performance_df['avg_days_to_accept'] = pd.to_numeric(performance_df['avg_days_to_accept'])
+        performance_df['max_days_to_accept'] = pd.to_numeric(performance_df['max_days_to_accept'])
+        
+        # Debug: display data types (only show if debug mode is enabled)
+        debug_mode = False
+        if debug_mode:
+            st.write("Data types:", performance_df.dtypes)
+        
+        # Convert DataFrame to long format for Plotly Express
+        try:
+            performance_long_df = pd.melt(
+                performance_df,
+                id_vars=['warehouse_name'],
+                value_vars=['avg_days_to_accept', 'max_days_to_accept'],
+                var_name='metric',
+                value_name='days'
+            )
+            
+            # Map the metric names to their translated labels
+            metric_mapping = {
+                'avg_days_to_accept': t["avg_processing_days"],
+                'max_days_to_accept': t["max_processing_days"]
+            }
+            performance_long_df['metric'] = performance_long_df['metric'].map(metric_mapping)
+            
+            # Create a bar chart for processing times by warehouse using the long format DataFrame
+            fig1 = px.bar(
+                performance_long_df,
+                x="warehouse_name",
+                y="days",
+                color="metric",
+                barmode="group",
+                labels={
+                    "warehouse_name": t["warehouse_name"],
+                    "days": t["processing_time"],
+                    "metric": t["metric_label"]
+                },
+                color_discrete_sequence=["#2C82C9", "#EF4836"],
+                height=400
+            )
+            
+            fig1.update_layout(
+                xaxis_tickangle=-45,
+                legend_title=t["metric_label"]
+            )
+            
+            st.plotly_chart(fig1, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error creating warehouse performance chart: {e}")
+            # Fallback to simple table display if chart fails
+            st.dataframe(performance_df, use_container_width=True)
+        
+        # Visualization 2: Efficiency Rating Distribution
+        if not efficiency_df.empty:
+            st.subheader(t["efficiency_distribution"])
+            
+            # Define colors based on rating
+            colors = {
+                'Excellent': '#27AE60',
+                'Good': '#2ECC71',
+                'Average': '#F1C40F',
+                'Below Average': '#E67E22',
+                'Poor': '#E74C3C'
+            }
+            
+            # Create color list based on efficiency_rating
+            color_list = [colors.get(rating, '#95A5A6') for rating in efficiency_df['efficiency_rating']]
+            
+            # Create a pie chart for efficiency rating distribution
+            fig2 = px.pie(
+                efficiency_df,
+                values='warehouse_count',
+                names='efficiency_rating',
+                color='efficiency_rating',
+                color_discrete_map={rating: colors.get(rating, '#95A5A6') for rating in efficiency_df['efficiency_rating']},
+                title=t["efficiency_distribution"],
+                labels={
+                    'warehouse_count': t["shipment_count"],
+                    'efficiency_rating': t["rating"]
+                }
+            )
+            
+            fig2.update_traces(textposition='inside', textinfo='percent+label')
+            
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        # Visualization 3: Product Restocking Priorities
+        if not priorities_df.empty:
+            st.subheader(t["restocking_priorities"])
+            
+            # Create horizontal bar chart for top priority products
+            fig3 = px.bar(
+                priorities_df,
+                y='product_id',
+                x='priority_score',
+                color='processing_speed',
+                orientation='h',
+                labels={
+                    'product_id': t["product_id"],
+                    'priority_score': t["priority_score"],
+                    'processing_speed': t["processing_speed"],
+                    'warehouse_name': t["warehouse_name"]
+                },
+                hover_data=['warehouse_name'],
+                color_discrete_sequence=px.colors.sequential.Viridis,
+                height=500
+            )
+            
+            fig3.update_layout(
+                xaxis_title=t["priority_score"],
+                yaxis_title=t["product_id"],
+                yaxis={'categoryorder': 'total ascending'}
+            )
+            
+            st.plotly_chart(fig3, use_container_width=True)
