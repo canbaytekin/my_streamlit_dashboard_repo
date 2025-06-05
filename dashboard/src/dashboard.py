@@ -674,7 +674,7 @@ with tab1:
                 values=[
                     deficit_counts['warehouseName'],
                     deficit_counts['deficit_product_count'],
-                    deficit_counts['total_deficit'].round(1)
+                    deficit_counts['total_deficit'].astype(float).round(1)
                 ],
                 fill_color=[['grey' if i % 2 == 0 else 'white' for i in range(len(deficit_counts))]],
                 align='left',
