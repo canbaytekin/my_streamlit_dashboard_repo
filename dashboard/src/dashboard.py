@@ -329,8 +329,8 @@ with tab1:
                     warehouse_name, nm_id, tech_size,
                     COUNT(*) AS current_month_sales,
                     SUM(price_with_disc) AS current_month_amount
-                FROM public.sales
-                WHERE year = EXTRACT(YEAR FROM CURRENT_DATE) AND month = EXTRACT(MONTH FROM CURRENT_DATE)
+                FROM belara_silver.sales
+                WHERE EXTRACT(YEAR FROM last_change_date) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM last_change_date) = EXTRACT(MONTH FROM CURRENT_DATE)
                 GROUP BY warehouse_name, nm_id, tech_size
             ),
             last_month_sales AS (
@@ -338,10 +338,10 @@ with tab1:
                     warehouse_name, nm_id, tech_size,
                     COUNT(*) AS last_month_sales,
                     SUM(price_with_disc) AS last_month_amount
-                FROM public.sales
+                FROM belara_silver.sales
                 WHERE 
-                    (EXTRACT(MONTH FROM CURRENT_DATE) = 1 AND year = EXTRACT(YEAR FROM CURRENT_DATE) - 1 AND month = 12) OR
-                    (EXTRACT(MONTH FROM CURRENT_DATE) > 1 AND year = EXTRACT(YEAR FROM CURRENT_DATE) AND month = EXTRACT(MONTH FROM CURRENT_DATE) - 1)
+                    (EXTRACT(MONTH FROM CURRENT_DATE) = 1 AND EXTRACT(YEAR FROM last_change_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 1 AND EXTRACT(MONTH FROM last_change_date) = 12) OR
+                    (EXTRACT(MONTH FROM CURRENT_DATE) > 1 AND EXTRACT(YEAR FROM last_change_date) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM last_change_date) = EXTRACT(MONTH FROM CURRENT_DATE) - 1)
                 GROUP BY warehouse_name, nm_id, tech_size
             ),
             current_stock AS (
@@ -351,7 +351,7 @@ with tab1:
                     in_way_to_client AS in_delivery, in_way_from_client AS in_return, price AS avg_price
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (PARTITION BY warehouse_name, nm_id, tech_size ORDER BY last_change_date DESC) as rn
-                    FROM public.stocks
+                    FROM belara_silver.warehouse
                 ) ranked
                 WHERE rn = 1
             )
@@ -483,7 +483,7 @@ with tab1:
                     WHEN current_stock < (sales_last_month * {sales_target_multiplier}) THEN TRUE
                     ELSE FALSE
                 END AS needs_restock
-            FROM public.product_restock
+            FROM belara_gold_marts.product_restock
             WHERE {where_clause}
             ORDER BY warehouse_name, stock_deficit DESC
             """
@@ -742,7 +742,7 @@ with tab1:
                         ELSE FALSE
                     END AS needs_restock,
                     CEIL((sales_last_month * {sales_target_multiplier}) - current_stock) AS stock_deficit
-                FROM public.product_restock
+                FROM belara_gold_marts.product_restock
             )
             SELECT 
                 "warehouseName",
@@ -850,7 +850,7 @@ with tab2:
                     total_orders AS "Total Orders", 
                     total_sales AS "Total Sales",
                     sale_order_ratio AS "Sale_Order_Ratio"  -- Added Sale_Order_Ratio
-                FROM public.daily_sales_orders_summary
+                FROM belara_gold_marts.daily_sales_orders_summary
                 ORDER BY summary_date DESC
             """
             
@@ -956,7 +956,7 @@ with tab3:
                     min_days_to_accept,
                     max_days_to_accept,
                     shipment_count
-                FROM public.recent_warehouse_performance
+                FROM belara_gold_marts.recent_warehouse_performance
                 ORDER BY avg_days_to_accept ASC
             """
             
@@ -971,7 +971,7 @@ with tab3:
                 SELECT 
                     processing_speed_rating as efficiency_rating,
                     COUNT(*) as warehouse_count
-                FROM public.restocking_efficiency
+                FROM belara_gold_marts.restocking_efficiency
                 GROUP BY processing_speed_rating
                 ORDER BY CASE 
                     WHEN processing_speed_rating = 'Excellent' THEN 1
@@ -996,7 +996,7 @@ with tab3:
                     processing_speed,
                     priority as priority_score,
                     warehouse_name
-                FROM public.product_shipping_analysis
+                FROM belara_gold_marts.product_shipping_analysis
                 ORDER BY priority DESC
                 LIMIT 15
             """
