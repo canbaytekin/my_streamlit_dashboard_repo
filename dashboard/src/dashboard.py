@@ -13,9 +13,43 @@ import time
 import glob
 import re
 from dotenv import load_dotenv
+import hashlib
 
 # Load environment variables
 load_dotenv()
+
+# Authentication functions
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    def validate_login():
+        return (
+            st.session_state["username"] == st.secrets.get("DASHBOARD_USERNAME", "admin") and 
+            st.session_state["password"] == st.secrets.get("DASHBOARD_PASSWORD", "password")
+        )
+
+    # Return True if the username + password is validated.
+    if st.session_state.get("authenticated"):
+        return True
+    
+    # Show login form - completely separate from the dashboard content
+    st.markdown("## Dashboard Login")
+    
+    # Create login form
+    with st.form("login_form"):
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        submitted = st.form_submit_button("Login")
+    
+    if submitted and validate_login():
+        st.session_state["authenticated"] = True
+        st.rerun()  # Rerun the app to show the dashboard
+        return True
+    elif submitted:
+        st.error("❌ Invalid username or password")
+        return False
+    else:
+        return False
 
 # Language dictionary for translations
 translations = {
@@ -176,6 +210,12 @@ st.set_page_config(page_title="Warehouse Analytics Dashboard", layout="wide")
 
 # Path to configuration file - store in the same directory as the script
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dashboard_config.json')
+
+# Check authentication before showing the dashboard
+if not check_password():
+    st.stop()  # Stop execution if not authenticated
+
+# If we reach here, user is authenticated - show the dashboard
 
 # Supabase connection parameters from Streamlit secrets
 @st.cache_resource
