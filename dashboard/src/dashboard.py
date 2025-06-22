@@ -23,9 +23,18 @@ def check_password():
     """Returns `True` if the user had the correct password."""
     
     def validate_login():
+        # Get credentials from secrets with proper fallbacks
+        expected_username = st.secrets.get("DASHBOARD_USERNAME", "admin")
+        expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password")
+        
+        # Debug info (remove in production)
+        print(f"Expected username: {expected_username}")
+        print(f"Entered username: {st.session_state.get('username', '')}")
+        
+        # Check credentials
         return (
-            st.session_state["username"] == st.secrets.get("DASHBOARD_USERNAME", "admin") and 
-            st.session_state["password"] == st.secrets.get("DASHBOARD_PASSWORD", "password")
+            st.session_state.get("username", "") == expected_username and 
+            st.session_state.get("password", "") == expected_password
         )
 
     # Return True if the username + password is validated.
@@ -221,6 +230,9 @@ if not check_password():
 @st.cache_resource
 def get_db_connection_params():
     try:
+        # Print available secrets keys for debugging (remove in production)
+        print("Available secrets keys:", list(st.secrets.keys()))
+        
         return {
             "host": st.secrets["SUPABASE_HOST"],
             "database": st.secrets.get("SUPABASE_DATABASE", "postgres"),
@@ -228,9 +240,9 @@ def get_db_connection_params():
             "password": st.secrets["SUPABASE_PASSWORD"],
             "port": st.secrets.get("SUPABASE_PORT", "5432")
         }
-    except KeyError:
-        st.error("""
-        ## Missing Streamlit Secrets!
+    except KeyError as e:
+        st.error(f"""
+        ## Missing Streamlit Secrets! ({str(e)})
         This app requires database credentials in Streamlit secrets.
         
         ### For local development:
