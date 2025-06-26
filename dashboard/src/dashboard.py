@@ -23,15 +23,17 @@ def check_password():
     """Returns `True` if the user had the correct password."""
     
     def validate_login():
-        # For Streamlit Cloud deployment - check if we're running in the cloud
-        is_cloud = os.environ.get('STREAMLIT_SHARING', '') == 'true'
+        # Better cloud deployment detection - check multiple environment indicators
+        is_cloud = (os.environ.get('STREAMLIT_SHARING', '') == 'true' or 
+                   os.environ.get('IS_STREAMLIT_CLOUD', '') == 'true' or
+                   os.environ.get('STREAMLIT_RUNTIME_ENVIRONMENT', '') == 'cloud')
         
         # Get credentials from secrets with proper fallbacks
         if is_cloud:
-            # In cloud deployment, use hardcoded credentials for now
-            # IMPORTANT: Replace these with your actual credentials before deployment
-            expected_username = "belara"
-            expected_password = "password123"
+            # In cloud deployment, use secrets first with fallback to hardcoded values
+            # This allows setting credentials in Streamlit Cloud secrets
+            expected_username = st.secrets.get("DASHBOARD_USERNAME", "belara")
+            expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password123")
         else:
             # In local development, use secrets
             expected_username = st.secrets.get("DASHBOARD_USERNAME", "admin")
@@ -877,6 +879,10 @@ SUPABASE_DATABASE = "postgres"
 SUPABASE_USER = "postgres"
 SUPABASE_PASSWORD = "your-database-password"
 SUPABASE_PORT = "5432"
+
+# Dashboard Authentication Credentials
+DASHBOARD_USERNAME = "admin"
+DASHBOARD_PASSWORD = "your-secure-password"
 
 # Add other secrets as needed
 """

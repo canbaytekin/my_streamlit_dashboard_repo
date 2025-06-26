@@ -25,6 +25,10 @@ SUPABASE_DATABASE = "postgres"
 SUPABASE_USER = "postgres"
 SUPABASE_PASSWORD = "your-database-password"
 SUPABASE_PORT = "5432"
+
+# Dashboard Authentication Credentials
+DASHBOARD_USERNAME = "admin"
+DASHBOARD_PASSWORD = "your-secure-password"
 EOF
     echo "Please edit .streamlit/secrets.toml with your actual database credentials"
 else

@@ -36,6 +36,10 @@ pip install -r requirements.txt
    SUPABASE_USER = "postgres"
    SUPABASE_PASSWORD = "your-password"
    SUPABASE_PORT = "5432"
+   
+   # Dashboard authentication credentials
+   DASHBOARD_USERNAME = "admin"
+   DASHBOARD_PASSWORD = "your-secure-password"
    ```
 
 ## Running the Dashboard
@@ -43,6 +47,31 @@ pip install -r requirements.txt
 ```bash
 streamlit run src/dashboard.py
 ```
+
+## Streamlit Cloud Deployment
+
+When deploying to Streamlit Cloud:
+
+1. Push your code to GitHub (without the `.streamlit/secrets.toml` file)
+
+2. Create a new app in Streamlit Cloud pointing to your repository
+
+3. Add the required secrets in the Streamlit Cloud dashboard under "Settings" > "Secrets":
+   ```toml
+   SUPABASE_HOST = "your-project.supabase.co"
+   SUPABASE_DATABASE = "postgres"
+   SUPABASE_USER = "postgres"
+   SUPABASE_PASSWORD = "your-password"
+   SUPABASE_PORT = "5432"
+   
+   # Dashboard authentication credentials (IMPORTANT)
+   DASHBOARD_USERNAME = "your-chosen-username"
+   DASHBOARD_PASSWORD = "your-secure-password"
+   ```
+
+4. If you don't add the authentication credentials, the default values will be:
+   - Username: belara
+   - Password: password123
 
 ## Configuration
 
