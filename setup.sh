@@ -38,4 +38,4 @@ fi
 echo ""
 echo "Setup complete! You can now run the dashboard with:"
 echo "source venv/bin/activate"
-echo "streamlit run dashboard.py" 
+echo "streamlit run dashboard.py"
