@@ -23,11 +23,22 @@ def check_password():
     """Returns `True` if the user had the correct password."""
     
     def validate_login():
+        # For Streamlit Cloud deployment - check if we're running in the cloud
+        is_cloud = os.environ.get('STREAMLIT_SHARING', '') == 'true'
+        
         # Get credentials from secrets with proper fallbacks
-        expected_username = st.secrets.get("DASHBOARD_USERNAME", "admin")
-        expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password")
+        if is_cloud:
+            # In cloud deployment, use hardcoded credentials for now
+            # IMPORTANT: Replace these with your actual credentials before deployment
+            expected_username = "belara"
+            expected_password = "password123"
+        else:
+            # In local development, use secrets
+            expected_username = st.secrets.get("DASHBOARD_USERNAME", "admin")
+            expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password")
         
         # Debug info (remove in production)
+        print(f"Is cloud deployment: {is_cloud}")
         print(f"Expected username: {expected_username}")
         print(f"Entered username: {st.session_state.get('username', '')}")
         
