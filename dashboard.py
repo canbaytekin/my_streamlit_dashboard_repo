@@ -1186,20 +1186,34 @@ with tab3:
         if not priorities_df.empty:
             st.subheader(t["restocking_priorities"])
             
+            # Convert priority_score to numeric if it's not already
+            if priorities_df['priority_score'].dtype == object:
+                # Create a mapping for priority levels
+                priority_map = {
+                    'Low': 1,
+                    'Medium': 2,
+                    'High': 3,
+                    'Critical': 4
+                }
+                # Apply the mapping or use the original value if it's already numeric
+                priorities_df['priority_numeric'] = priorities_df['priority_score'].map(priority_map).fillna(priorities_df['priority_score'])
+            else:
+                priorities_df['priority_numeric'] = priorities_df['priority_score']
+            
             # Create horizontal bar chart for top priority products
             fig3 = px.bar(
                 priorities_df,
                 y='product_id',
-                x='priority_score',
+                x='priority_numeric',
                 color='processing_speed',
                 orientation='h',
                 labels={
                     'product_id': t["product_id"],
-                    'priority_score': t["priority_score"],
+                    'priority_numeric': t["priority_score"],
                     'processing_speed': t["processing_speed"],
                     'warehouse_name': t["warehouse_name"]
                 },
-                hover_data=['warehouse_name'],
+                hover_data=['warehouse_name', 'priority_score'],
                 color_discrete_sequence=px.colors.sequential.Viridis,
                 height=500
             )
