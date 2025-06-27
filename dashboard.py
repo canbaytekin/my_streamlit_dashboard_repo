@@ -148,7 +148,10 @@ translations = {
         "processing_speed": "Processing Speed",
         "no_shipment_data": "No shipment data available.",
         "efficiency_distribution": "Efficiency Rating Distribution",
-        "rating": "Rating"
+        "rating": "Rating",
+        "warehouse_priority_distribution": "Warehouse Priority Distribution",
+        "priority_product_distribution": "Priority Product Distribution by Warehouse",
+        "unique_product_count": "Product Count"
     },
     "Russian": {
         "page_title": "Панель аналитики склада",
@@ -223,7 +226,10 @@ translations = {
         "processing_speed": "Скорость обработки",
         "no_shipment_data": "Данные о поставках отсутствуют.",
         "efficiency_distribution": "Распределение рейтинга эффективности",
-        "rating": "Рейтинг"
+        "rating": "Рейтинг",
+        "warehouse_priority_distribution": "Распределение приоритетов склада",
+        "priority_product_distribution": "Распределение товаров по приоритетам склада",
+        "unique_product_count": "Количество товаров"
     }
 }
 
@@ -1061,13 +1067,13 @@ with tab3:
             # Query for product shipping analysis with priority
             query_priorities = """
                 SELECT 
-                    nm_id as product_id,
+                    warehouse_name,
+                    priority,
+                    priority_score,
                     processing_speed,
-                    priority as priority_score,
-                    warehouse_name
-                FROM belara_gold_marts.product_shipping_analysis
-                ORDER BY priority DESC
-                LIMIT 15
+                    unique_product_count
+                FROM belara_gold_marts.warehouse_priority_summary
+                ORDER BY warehouse_name, priority_score DESC
             """
             
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
@@ -1186,42 +1192,64 @@ with tab3:
         if not priorities_df.empty:
             st.subheader(t["restocking_priorities"])
             
-            # Convert priority_score to numeric if it's not already
-            if priorities_df['priority_score'].dtype == object:
-                # Create a mapping for priority levels
-                priority_map = {
-                    'Low': 1,
-                    'Medium': 2,
-                    'High': 3,
-                    'Critical': 4
-                }
-                # Apply the mapping or use the original value if it's already numeric
-                priorities_df['priority_numeric'] = priorities_df['priority_score'].map(priority_map).fillna(priorities_df['priority_score'])
-            else:
-                priorities_df['priority_numeric'] = priorities_df['priority_score']
+            # Pivot the data for the heatmap
+            pivot_df = priorities_df.pivot_table(
+                index='warehouse_name',
+                columns='priority',
+                values='unique_product_count',
+                aggfunc='sum',
+                fill_value=0
+            )
             
-            # Create horizontal bar chart for top priority products
-            fig3 = px.bar(
-                priorities_df,
-                y='product_id',
-                x='priority_numeric',
-                color='processing_speed',
-                orientation='h',
-                labels={
-                    'product_id': t["product_id"],
-                    'priority_numeric': t["priority_score"],
-                    'processing_speed': t["processing_speed"],
-                    'warehouse_name': t["warehouse_name"]
-                },
-                hover_data=['warehouse_name', 'priority_score'],
-                color_discrete_sequence=px.colors.sequential.Viridis,
-                height=500
+            # Ensure consistent column order
+            priority_order = ['Critical', 'High', 'Medium', 'Low']
+            pivot_df = pivot_df.reindex(columns=priority_order, fill_value=0)
+            
+            # Create heatmap using plotly
+            fig3 = px.imshow(
+                pivot_df,
+                labels=dict(
+                    x=t.get("priority", "Priority"),
+                    y=t["warehouse_name"],
+                    color=t.get("unique_product_count", "Product Count")
+                ),
+                x=pivot_df.columns,
+                y=pivot_df.index,
+                color_continuous_scale="Viridis",
+                aspect="auto",
+                text_auto=True
             )
             
             fig3.update_layout(
-                xaxis_title=t["priority_score"],
-                yaxis_title=t["product_id"],
-                yaxis={'categoryorder': 'total ascending'}
+                title=t.get("warehouse_priority_distribution", "Warehouse Priority Distribution"),
+                xaxis_title=t.get("priority", "Priority"),
+                yaxis_title=t["warehouse_name"],
+                height=500
             )
             
             st.plotly_chart(fig3, use_container_width=True)
+            
+            # Add a supplementary stacked bar chart to show distribution
+            fig4 = px.bar(
+                priorities_df,
+                x="warehouse_name",
+                y="unique_product_count",
+                color="priority",
+                category_orders={"priority": priority_order},
+                labels={
+                    "warehouse_name": t["warehouse_name"],
+                    "unique_product_count": t.get("unique_product_count", "Product Count"),
+                    "priority": t.get("priority", "Priority")
+                },
+                color_discrete_sequence=px.colors.sequential.Viridis_r,
+                height=400
+            )
+            
+            fig4.update_layout(
+                title=t.get("priority_product_distribution", "Priority Product Distribution by Warehouse"),
+                xaxis_title=t["warehouse_name"],
+                yaxis_title=t.get("unique_product_count", "Product Count"),
+                legend_title=t.get("priority", "Priority")
+            )
+            
+            st.plotly_chart(fig4, use_container_width=True)
