@@ -767,7 +767,6 @@ with tab1:
 
     # Footer
     st.markdown("---")
-    st.markdown(t["footer_text"])
 
     # Function to generate a secrets.toml template file
     def generate_secrets_template():
