@@ -112,6 +112,9 @@ translations = {
         "detailed_data_header": "Detailed Data - Products Needing Restock",
         "no_products_matching": "No products matching your filter criteria need restocking.",
         "download_button": "Download Product Restock Data",
+        "download_sales_data": "Download Sales Data",
+        "download_shipment_performance_data": "Download Shipment Performance Data",
+        "download_shipment_priorities_data": "Download Restocking Priorities Data",
         "footer_text": "Warehouse Stock Deficit Dashboard",
         "refresh_data": "Refresh Data",
         "data_refreshed": "Data refreshed successfully!",
@@ -184,6 +187,9 @@ translations = {
         "detailed_data_header": "Подробные данные - товары, требующие пополнения",
         "no_products_matching": "Нет товаров, соответствующих вашим критериям фильтра, требующих пополнения.",
         "download_button": "Скачать данные о пополнении товаров",
+        "download_sales_data": "Скачать данные о продажах",
+        "download_shipment_performance_data": "Скачать данные о производительности доставки",
+        "download_shipment_priorities_data": "Скачать данные о приоритетах пополнения",
         "footer_text": "Панель дефицита складских запасов",
         "refresh_data": "Обновить данные",
         "data_refreshed": "Данные успешно обновлены!",
@@ -903,6 +909,16 @@ with tab2:
         # Display the dataframe with all columns including Sale_Order_Ratio, if needed for debugging or full view
         st.dataframe(sales_orders_df, use_container_width=True)
 
+        # Add download button for sales and orders data
+        if not sales_orders_df.empty:
+            csv_sales = sales_orders_df.to_csv(index=False)
+            st.download_button(
+                label=t.get("download_sales_data", "Download Sales Data"),
+                data=csv_sales,
+                file_name="sales_orders_data.csv",
+                mime="text/csv",
+            )
+
 with tab3:
     st.header(t["shipment_title"])
     
@@ -1150,3 +1166,23 @@ with tab3:
             )
             
             st.plotly_chart(fig4, use_container_width=True)
+
+            # Download button for priorities data
+            csv_priorities = priorities_df.to_csv(index=False)
+            st.download_button(
+                label=t.get("download_shipment_priorities_data", "Download Restocking Priorities Data"),
+                data=csv_priorities,
+                file_name="restocking_priorities_data.csv",
+                mime="text/csv",
+                key="download-priorities"
+            )
+        
+        # Download button for performance data
+        csv_performance = performance_df.to_csv(index=False)
+        st.download_button(
+            label=t.get("download_shipment_performance_data", "Download Shipment Performance Data"),
+            data=csv_performance,
+            file_name="shipment_performance_data.csv",
+            mime="text/csv",
+            key="download-performance"
+        )
