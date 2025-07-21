@@ -112,13 +112,7 @@ translations = {
         "detailed_data_header": "Detailed Data - Products Needing Restock",
         "no_products_matching": "No products matching your filter criteria need restocking.",
         "download_button": "Download Product Restock Data",
-        "database_query_header": "Database Query",
-        "run_custom_query": "Run Custom PostgreSQL Query",
-        "enter_sql_query": "Enter SQL Query",
-        "execute_query": "Execute Query",
-        "query_results": "Query Results",
-        "download_query_results": "Download Query Results",
-        "footer_text": "Simplified Warehouse Stock Deficit Dashboard | PostgreSQL Integration",
+        "footer_text": "Warehouse Stock Deficit Dashboard",
         "refresh_data": "Refresh Data",
         "data_refreshed": "Data refreshed successfully!",
         "last_refresh": "Last refresh: {0}",
@@ -190,13 +184,7 @@ translations = {
         "detailed_data_header": "Подробные данные - товары, требующие пополнения",
         "no_products_matching": "Нет товаров, соответствующих вашим критериям фильтра, требующих пополнения.",
         "download_button": "Скачать данные о пополнении товаров",
-        "database_query_header": "Запрос к базе данных",
-        "run_custom_query": "Выполнить пользовательский запрос PostgreSQL",
-        "enter_sql_query": "Введите SQL-запрос",
-        "execute_query": "Выполнить запрос",
-        "query_results": "Результаты запроса",
-        "download_query_results": "Скачать результаты запроса",
-        "footer_text": "Упрощенная панель дефицита складских запасов | Интеграция PostgreSQL",
+        "footer_text": "Панель дефицита складских запасов",
         "refresh_data": "Обновить данные",
         "data_refreshed": "Данные успешно обновлены!",
         "last_refresh": "Последнее обновление: {0}",
@@ -733,32 +721,14 @@ with tab1:
         # Create table for warehouses with deficit
         st.subheader(t["warehouses_with_deficit"])
         
-        # Use Plotly table for better visualization
-        fig = go.Figure(data=[go.Table(
-            header=dict(
-                values=[t["warehouse_name"], t["products_with_deficit"], t["total_deficit"]],
-                fill_color='grey',
-                align='left',
-                font=dict(color='black', size=14)
-            ),
-            cells=dict(
-                values=[
-                    deficit_counts['warehouseName'],
-                    deficit_counts['deficit_product_count'],
-                    deficit_counts['total_deficit'].astype(float).round(1)
-                ],
-                fill_color=[['grey' if i % 2 == 0 else 'white' for i in range(len(deficit_counts))]],
-                align='left',
-                font=dict(color='black', size=13)
-            )
-        )])
-        
-        fig.update_layout(
-            margin=dict(l=0, r=0, b=0, t=0),
-            height=400
+        # Display the data using a styled DataFrame
+        st.dataframe(
+            deficit_counts.style.highlight_max(
+                axis=0, 
+                subset=['deficit_product_count', 'total_deficit']
+            ), 
+            use_container_width=True
         )
-        
-        st.plotly_chart(fig, use_container_width=True)
 
     # Detailed data - replaced filtered_df with product_restock data
     st.header(t["detailed_data_header"])
@@ -794,77 +764,6 @@ with tab1:
             mime="text/csv",
         )
 
-    # Add PostgreSQL direct query section
-    st.header(t["database_query_header"])
-    with st.expander(t["run_custom_query"], expanded=False):
-        direct_query = st.text_area(
-            t["enter_sql_query"],
-            f"""
-            WITH filtered_data AS (
-                SELECT 
-                    warehouse_name as "warehouseName",
-                    nm_id as "nmId",
-                    tech_size as "techSize",
-                    current_stock,
-                    sales_last_month,
-                    sales_last_month * {sales_target_multiplier} as sales_target,
-                    CASE 
-                        WHEN current_stock < (sales_last_month * {sales_target_multiplier}) THEN TRUE
-                        ELSE FALSE
-                    END AS needs_restock,
-                    CEIL((sales_last_month * {sales_target_multiplier}) - current_stock) AS stock_deficit
-                FROM belara_gold_marts.product_restock
-            )
-            SELECT 
-                "warehouseName",
-                COUNT(*) as deficit_product_count,
-                SUM(stock_deficit) as total_deficit
-            FROM filtered_data
-            WHERE needs_restock = TRUE
-            GROUP BY "warehouseName"
-            ORDER BY deficit_product_count DESC
-            """,
-            height=200
-        )
-        
-        if st.button(t["execute_query"]):
-            try:
-                # Get connection parameters from secrets
-                db_params = get_db_connection_params()
-                
-                conn = psycopg2.connect(
-                    host=db_params["host"],
-                    database=db_params["database"],
-                    user=db_params["user"],
-                    password=db_params["password"],
-                    port=db_params["port"]
-                )
-                
-                # Execute the query and load into DataFrame
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-                    cursor.execute(direct_query)
-                    columns = [desc[0] for desc in cursor.description]
-                    data = cursor.fetchall()
-                    result_df = pd.DataFrame(data, columns=columns)
-                
-                conn.close()
-                
-                # Display the query results
-                st.subheader(t["query_results"])
-                
-                # Show dataframe for interactive features
-                st.dataframe(result_df, use_container_width=True)
-                
-                # Option to download query results
-                csv = result_df.to_csv(index=False)
-                st.download_button(
-                    label=t["download_query_results"],
-                    data=csv,
-                    file_name="query_results.csv",
-                    mime="text/csv",
-                )
-            except Exception as e:
-                st.error(f"Query execution error: {e}")
 
     # Footer
     st.markdown("---")
