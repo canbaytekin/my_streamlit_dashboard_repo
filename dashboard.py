@@ -907,7 +907,7 @@ with tab2:
             st.info(t.get("ratio_data_missing", "Sale_Order_Ratio data not available to display trend."))
 
         # Display the dataframe with all columns including Sale_Order_Ratio, if needed for debugging or full view
-        st.dataframe(sales_orders_df, use_container_width=True)
+        st.dataframe(sales_orders_df.sort_values(by="Date", ascending=False), use_container_width=True)
 
         # Add download button for sales and orders data
         if not sales_orders_df.empty:
