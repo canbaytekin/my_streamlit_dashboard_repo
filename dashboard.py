@@ -148,7 +148,16 @@ translations = {
         "rating": "Rating",
         "warehouse_priority_distribution": "Warehouse Priority Distribution",
         "priority_product_distribution": "Priority Product Distribution by Warehouse",
-        "unique_product_count": "Product Count"
+        "unique_product_count": "Product Count",
+        "hero_products_tab": "Hero Products List",
+        "hero_products_title": "Hero Products Analysis",
+        "hero_products_subtitle": "Top selling products by sales amount and quantity",
+        "top_n_products_chart": "Top {0} Hero Products by Sales Amount",
+        "hero_products_table": "Hero Products Data",
+        "sales_amount": "Sales Amount",
+        "sales_quantity": "Sales Quantity",
+        "no_hero_products": "No hero products found for the selected filters.",
+        "download_hero_products_data": "Download Hero Products Data"
     },
     "Russian": {
         "page_title": "Панель аналитики склада",
@@ -223,7 +232,16 @@ translations = {
         "rating": "Рейтинг",
         "warehouse_priority_distribution": "Распределение приоритетов склада",
         "priority_product_distribution": "Распределение товаров по приоритетам склада",
-        "unique_product_count": "Количество товаров"
+        "unique_product_count": "Количество товаров",
+        "hero_products_tab": "Список продуктов-героев",
+        "hero_products_title": "Анализ продуктов-героев",
+        "hero_products_subtitle": "Самые продаваемые товары по сумме и количеству продаж",
+        "top_n_products_chart": "Топ {0} продуктов-героев по сумме продаж",
+        "hero_products_table": "Данные о продуктах-героях",
+        "sales_amount": "Сумма продаж",
+        "sales_quantity": "Количество продаж",
+        "no_hero_products": "Продукты-герои для выбранных фильтров не найдены.",
+        "download_hero_products_data": "Скачать данные о продуктах-героях"
     }
 }
 
@@ -310,7 +328,8 @@ with col1:
 tab1_title = t["stock_deficit_overview"] # Or a more specific title for the first tab if needed
 tab2_title = t["sales_orders_tab"]
 tab3_title = t["shipment_tab"]
-tab1, tab2, tab3 = st.tabs([tab1_title, tab2_title, tab3_title])
+tab4_title = t["hero_products_tab"]
+tab1, tab2, tab3, tab4 = st.tabs([tab1_title, tab2_title, tab3_title, tab4_title])
 
 with tab1:
     # Add refresh button at the top
@@ -698,6 +717,31 @@ with tab1:
             options=sizes,
             default=[]
         )
+
+    # Create time filter
+    st.sidebar.header("Time Filter")
+    time_filter_option = st.sidebar.radio(
+        "Select time range",
+        ("Last 1 day", "Last 7 days", "Last 30 days", "Custom Range", "All Time"),
+        index=4
+    )
+
+    start_date = None
+    end_date = None
+
+    if time_filter_option != "All Time":
+        end_date = datetime.now()
+        if time_filter_option == "Last 1 day":
+            start_date = end_date - pd.Timedelta(days=1)
+        elif time_filter_option == "Last 7 days":
+            start_date = end_date - pd.Timedelta(days=7)
+        elif time_filter_option == "Last 30 days":
+            start_date = end_date - pd.Timedelta(days=30)
+        elif time_filter_option == "Custom Range":
+            start_date_input = st.sidebar.date_input("Start date", datetime.now() - pd.Timedelta(days=7))
+            end_date_input = st.sidebar.date_input("End date", datetime.now())
+            start_date = datetime.combine(start_date_input, datetime.min.time())
+            end_date = datetime.combine(end_date_input, datetime.max.time())
 
     # Filter the data based on selections
     filtered_df = df[
@@ -1185,4 +1229,102 @@ with tab3:
             file_name="shipment_performance_data.csv",
             mime="text/csv",
             key="download-performance"
+        )
+
+with tab4:
+    st.header(t["hero_products_title"])
+    st.markdown(t["hero_products_subtitle"])
+
+    @st.cache_data(ttl=300)
+    def load_hero_products_data(warehouses=None, brands=None, categories=None, subjects=None):
+        try:
+            db_params = get_db_connection_params()
+            conn = psycopg2.connect(**db_params)
+            
+            filter_conditions = []
+            if warehouses:
+                warehouse_list = ", ".join([f"'{w.replace("'", "''")}'" for w in warehouses])
+                filter_conditions.append(f"warehouse_name IN ({warehouse_list})")
+            if brands:
+                brand_list = ", ".join([f"'{b.replace("'", "''")}'" for b in brands])
+                filter_conditions.append(f"brand IN ({brand_list})")
+            if categories:
+                category_list = ", ".join([f"'{c.replace("'", "''")}'" for c in categories])
+                filter_conditions.append(f"category IN ({category_list})")
+            if subjects:
+                subject_list = ", ".join([f"'{s.replace("'", "''")}'" for s in subjects])
+                filter_conditions.append(f"subject IN ({subject_list})")
+
+            # Add date filter for last 90 days
+            filter_conditions.append("last_change_date >= CURRENT_DATE - INTERVAL '90 days'")
+
+            where_clause = " AND ".join(filter_conditions) if filter_conditions else "1=1"
+
+            query = f"""
+                SELECT 
+                    nm_id AS "nmId",
+                    supplier_article AS "supplierArticle",
+                    SUM(finished_price) AS "salesAmount",
+                    COUNT(*) AS "salesQuantity"
+                FROM belara_bronze.wildberries_sales
+                WHERE {where_clause}
+                GROUP BY nm_id, supplier_article
+                ORDER BY "salesAmount" DESC
+            """
+
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+                cursor.execute(query)
+                columns = [desc[0] for desc in cursor.description]
+                data = cursor.fetchall()
+                df = pd.DataFrame(data, columns=columns)
+            
+            conn.close()
+            return df
+        except Exception as e:
+            st.error(f"Error loading hero products data: {e}")
+            return pd.DataFrame(columns=["nmId", "supplierArticle", "salesAmount", "salesQuantity"])
+
+    # Load hero products data using the filters from the sidebar
+    hero_products_df = load_hero_products_data(
+        warehouses=selected_warehouses,
+        brands=selected_brands,
+        categories=selected_categories,
+        subjects=selected_subjects
+    )
+
+    if hero_products_df.empty:
+        st.info(t["no_hero_products"])
+    else:
+        # Chart: Top 10 Hero Products
+        st.subheader(t["top_n_products_chart"].format(10))
+        top_10_hero = hero_products_df.head(10)
+        
+        fig_hero = px.bar(
+            top_10_hero,
+            x="nmId",
+            y="salesAmount",
+            text="salesAmount",
+            hover_data=["supplierArticle", "salesQuantity"],
+            labels={
+                "nmId": t["product_id"],
+                "salesAmount": t["sales_amount"]
+            },
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        fig_hero.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+        fig_hero.update_layout(uniformtext_minsize=8, uniformtext_mode='hide', xaxis_type='category')
+        st.plotly_chart(fig_hero, use_container_width=True)
+
+        # Table: All Hero Products
+        st.subheader(t["hero_products_table"])
+        st.dataframe(hero_products_df, use_container_width=True)
+
+        # Download button
+        csv_hero = hero_products_df.to_csv(index=False)
+        st.download_button(
+            label=t["download_hero_products_data"],
+            data=csv_hero,
+            file_name="hero_products_data.csv",
+            mime="text/csv",
+            key="download-hero"
         )
