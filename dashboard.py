@@ -392,12 +392,9 @@ with tab1:
 
     # Function to load data from Supabase (PostgreSQL)
     @st.cache_data(ttl=300)  # Cache expires after 5 minutes
-    def load_data_from_supabase(sales_target_multiplier=1.5):
+    def load_data_from_supabase(sales_target_multiplier=1.5, start_date=None, end_date=None):
         try:
-            # Get connection parameters from secrets
             db_params = get_db_connection_params()
-            
-            # Connect to the Supabase PostgreSQL database
             conn = psycopg2.connect(
                 host=db_params["host"],
                 database=db_params["database"],
@@ -405,27 +402,23 @@ with tab1:
                 password=db_params["password"],
                 port=db_params["port"]
             )
-            
-            # Create the query with the parametric sales target multiplier
+
+            # Build sales filter for the selected time range
+            sales_time_filter = ""
+            if start_date and end_date:
+                sales_time_filter = f"WHERE last_change_date >= '{start_date.strftime('%Y-%m-%d')}' AND last_change_date <= '{end_date.strftime('%Y-%m-%d')}'"
+            else:
+                sales_time_filter = ""
+
+            # Query for sales in the selected period
             query = f"""
-            WITH current_month_sales AS (
+            WITH period_sales AS (
                 SELECT 
                     warehouse_name, nm_id, tech_size,
-                    COUNT(*) AS current_month_sales,
-                    SUM(price_with_disc) AS current_month_amount
+                    COUNT(*) AS period_sales,
+                    SUM(price_with_disc) AS period_amount
                 FROM belara_silver.sales
-                WHERE EXTRACT(YEAR FROM last_change_date) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM last_change_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-                GROUP BY warehouse_name, nm_id, tech_size
-            ),
-            last_month_sales AS (
-                SELECT 
-                    warehouse_name, nm_id, tech_size,
-                    COUNT(*) AS last_month_sales,
-                    SUM(price_with_disc) AS last_month_amount
-                FROM belara_silver.sales
-                WHERE 
-                    (EXTRACT(MONTH FROM CURRENT_DATE) = 1 AND EXTRACT(YEAR FROM last_change_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 1 AND EXTRACT(MONTH FROM last_change_date) = 12) OR
-                    (EXTRACT(MONTH FROM CURRENT_DATE) > 1 AND EXTRACT(YEAR FROM last_change_date) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM last_change_date) = EXTRACT(MONTH FROM CURRENT_DATE) - 1)
+                {sales_time_filter}
                 GROUP BY warehouse_name, nm_id, tech_size
             ),
             current_stock AS (
@@ -452,47 +445,40 @@ with tab1:
                 cs.total_stock, 
                 cs.in_delivery, 
                 cs.in_return,
-                COALESCE(cms.current_month_sales, 0) AS sales_this_month,
-                COALESCE(cms.current_month_amount, 0) AS amount_this_month,
-                COALESCE(lms.last_month_sales, 0) AS sales_last_month,
-                COALESCE(lms.last_month_amount, 0) AS amount_last_month,
-                COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier} AS sales_target,
+                COALESCE(ps.period_sales, 0) AS sales_in_period,
+                COALESCE(ps.period_amount, 0) AS amount_in_period,
+                COALESCE(ps.period_sales, 0) * {sales_target_multiplier} AS sales_target,
                 CASE 
-                    WHEN cs.current_stock + cs.in_return < (COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) THEN TRUE
+                    WHEN cs.current_stock + cs.in_return < (COALESCE(ps.period_sales, 0) * {sales_target_multiplier}) THEN TRUE
                     ELSE FALSE
                 END AS needs_restock,
-                CEIL((COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return)) AS stock_deficit,
-                (COALESCE(lms.last_month_sales, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return) AS sort_key
+                CEIL((COALESCE(ps.period_sales, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return)) AS stock_deficit,
+                (COALESCE(ps.period_sales, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return) AS sort_key
             FROM current_stock cs
-            LEFT JOIN current_month_sales cms
-                ON cs.warehouse_name = cms.warehouse_name AND cs.nm_id = cms.nm_id AND cs.tech_size = cms.tech_size
-            LEFT JOIN last_month_sales lms
-                ON cs.warehouse_name = lms.warehouse_name AND cs.nm_id = lms.nm_id AND cs.tech_size = lms.tech_size
+            LEFT JOIN period_sales ps
+                ON cs.warehouse_name = ps.warehouse_name AND cs.nm_id = ps.nm_id AND cs.tech_size = ps.tech_size
             WHERE cs.current_stock IS NOT NULL
             ORDER BY 
                 cs.warehouse_name,
                 sort_key DESC
             """
-            
+
             # Execute the query and load into DataFrame
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
                 cursor.execute(query)
                 columns = [desc[0] for desc in cursor.description]
                 data = cursor.fetchall()
                 df = pd.DataFrame(data, columns=columns)
-            
-            # Close the connection
+
             conn.close()
-            
-            return df
+            return df, query
         except Exception as e:
             st.error(f"Error connecting to Supabase: {e}")
-            # Return a sample dataframe with the correct columns as a fallback
             return pd.DataFrame(columns=[
                 'warehouseName', 'nmId', 'techSize', 'brand', 'category', 
                 'subject', 'current_stock', 'in_delivery', 'in_return', 
-                'sales_last_month', 'sales_target', 'stock_deficit'
-            ])
+                'sales_in_period', 'sales_target', 'stock_deficit'
+            ]), ""
 
     # Function to load data from product_restock with filters (using Supabase)
     @st.cache_data(ttl=300)  # Cache expires after 5 minutes
@@ -503,13 +489,13 @@ with tab1:
         categories=None, 
         subjects=None,
         products=None,
-        sizes=None
+        sizes=None,
+        supplier_articles=None,
+        start_date=None,
+        end_date=None
     ):
         try:
-            # Get connection parameters from secrets
             db_params = get_db_connection_params()
-            
-            # Connect to the Supabase PostgreSQL database
             conn = psycopg2.connect(
                 host=db_params["host"],
                 database=db_params["database"],
@@ -517,82 +503,150 @@ with tab1:
                 password=db_params["password"],
                 port=db_params["port"]
             )
-            
-            # Build filter conditions
+
             filter_conditions = []
-            
+
             if warehouses and len(warehouses) > 0:
                 warehouse_list = ", ".join([f"'{w}'" for w in warehouses])
-                filter_conditions.append(f"warehouse_name IN ({warehouse_list})")
-                
+                filter_conditions.append(f"cs.warehouse_name IN ({warehouse_list})")
             if brands and len(brands) > 0:
                 brand_list = ", ".join([f"'{b}'" for b in brands])
-                filter_conditions.append(f"brand IN ({brand_list})")
-                
+                filter_conditions.append(f"cs.brand IN ({brand_list})")
             if categories and len(categories) > 0:
                 category_list = ", ".join([f"'{c}'" for c in categories])
-                filter_conditions.append(f"category IN ({category_list})")
-                
+                filter_conditions.append(f"cs.category IN ({category_list})")
             if subjects and len(subjects) > 0:
                 subject_list = ", ".join([f"'{s}'" for s in subjects])
-                filter_conditions.append(f"subject IN ({subject_list})")
-                
+                filter_conditions.append(f"cs.subject IN ({subject_list})")
             if products and len(products) > 0:
                 product_list = ", ".join([str(p) for p in products])
-                filter_conditions.append(f"nm_id IN ({product_list})")
-                
+                filter_conditions.append(f"cs.nm_id IN ({product_list})")
             if sizes and len(sizes) > 0:
                 size_list = ", ".join([f"'{s}'" for s in sizes])
-                filter_conditions.append(f"tech_size IN ({size_list})")
-            
-            # Combine all filter conditions
+                filter_conditions.append(f"cs.tech_size IN ({size_list})")
+            if supplier_articles and len(supplier_articles) > 0:
+                supplier_article_list = ", ".join([f"'{s}'" for s in supplier_articles])
+                filter_conditions.append(f"cs.supplier_article IN ({supplier_article_list})")
+
             where_clause = " AND ".join(filter_conditions) if filter_conditions else "1=1"
-            
-            # Create the query
+
+            # Dynamic sales period calculation
+            sales_time_filter = ""
+            params = []
+            if start_date and end_date:
+                sales_time_filter = "WHERE s.date >= %s AND s.date <= %s"
+                params.extend([start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")])
+            else:
+                # Default to last month if not provided
+                sales_time_filter = "WHERE s.date >= date_trunc('month', current_date) - interval '1 month' AND s.date < date_trunc('month', current_date)"
+
             query = f"""
+            WITH current_stock AS (
+                SELECT 
+                    warehouse_name,
+                    nm_id,
+                    supplier_article,
+                    tech_size,
+                    brand,
+                    category,
+                    subject,
+                    quantity AS current_stock,
+                    in_way_to_client AS in_delivery,
+                    in_way_from_client AS in_return
+                FROM (
+                    SELECT *,
+                        ROW_NUMBER() OVER (PARTITION BY warehouse_name, nm_id, tech_size ORDER BY last_change_date DESC) AS rn
+                    FROM belara_silver.warehouse
+                ) ranked
+                WHERE rn = 1
+            ),
+            period_sales AS (
+                SELECT 
+                    warehouse_name,
+                    nm_id,
+                    supplier_article,
+                    tech_size,
+                    COUNT(*) AS sales_in_period
+                FROM belara_silver.sales s
+                {sales_time_filter}
+                GROUP BY warehouse_name, nm_id, supplier_article, tech_size
+            )
             SELECT 
-                warehouse_name AS "warehouseName",
-                nm_id AS "nmId", 
-                tech_size AS "techSize",
-                brand,
-                category,
-                subject,
-                current_stock,
-                in_delivery,
-                in_return,
-                sales_last_month,
-                sales_last_month * {sales_target_multiplier} AS sales_target,
-                CEIL((sales_last_month * {sales_target_multiplier}) - (current_stock + in_return)) AS stock_deficit,
+                cs.warehouse_name AS "warehouseName",
+                cs.nm_id AS "nmId",
+                cs.supplier_article AS "supplierArticle",
+                cs.tech_size AS "techSize",
+                cs.brand,
+                cs.category,
+                cs.subject,
+                cs.current_stock,
+                cs.in_delivery,
+                cs.in_return,
+                COALESCE(ps.sales_in_period, 0) AS sales_in_period,
+                COALESCE(ps.sales_in_period, 0) * {sales_target_multiplier} AS sales_target,
+                CEIL(GREATEST(0, (COALESCE(ps.sales_in_period, 0) * {sales_target_multiplier}) - (cs.current_stock + cs.in_return))) AS stock_deficit,
                 CASE 
-                    WHEN current_stock < (sales_last_month * {sales_target_multiplier}) THEN TRUE
+                    WHEN (cs.current_stock + cs.in_return) < (COALESCE(ps.sales_in_period, 0) * {sales_target_multiplier}) THEN TRUE
                     ELSE FALSE
                 END AS needs_restock
-            FROM belara_gold_marts.product_restock
+            FROM current_stock cs
+            LEFT JOIN period_sales ps
+                ON cs.warehouse_name = ps.warehouse_name
+                AND cs.nm_id = ps.nm_id
+                AND cs.tech_size = ps.tech_size
+                AND cs.supplier_article = ps.supplier_article
             WHERE {where_clause}
-            ORDER BY warehouse_name, stock_deficit DESC
+            ORDER BY cs.warehouse_name, stock_deficit DESC
             """
-            
-            # Execute the query and load into DataFrame
+
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-                cursor.execute(query)
+                cursor.execute(query, params)
                 columns = [desc[0] for desc in cursor.description]
                 data = cursor.fetchall()
                 df = pd.DataFrame(data, columns=columns)
-            
-            # Close the connection
+
             conn.close()
-            
             return df
         except Exception as e:
-            st.error(f"Error querying product_restock table: {e}")
+            st.error(f"Error querying dynamic product restock data: {e}")
             return pd.DataFrame(columns=[
-                'warehouseName', 'nmId', 'techSize', 'brand', 'category', 
+                'warehouseName', 'nmId', 'supplierArticle', 'techSize', 'brand', 'category', 
                 'subject', 'current_stock', 'in_delivery', 'in_return', 
-                'sales_last_month', 'sales_target', 'stock_deficit'
+                'sales_in_period', 'sales_target', 'stock_deficit'
             ])
 
-    # Load the data with the selected multiplier (using Supabase instead of DuckDB)
-    df = load_data_from_supabase(sales_target_multiplier)
+    # Create time filter
+    st.sidebar.header("Time Filter")
+    time_filter_option = st.sidebar.radio(
+        "Select time range",
+        ("Last 1 day", "Last 7 days", "Last 30 days", "Custom Range", "All Time"),
+        index=4,
+        key="sidebar_time_filter"
+    )
+
+    start_date = None
+    end_date = None
+
+    if time_filter_option != "All Time":
+        end_date = datetime.now()
+        if time_filter_option == "Last 1 day":
+            start_date = end_date - pd.Timedelta(days=1)
+        elif time_filter_option == "Last 7 days":
+            start_date = end_date - pd.Timedelta(days=7)
+        elif time_filter_option == "Last 30 days":
+            start_date = end_date - pd.Timedelta(days=30)
+        elif time_filter_option == "Custom Range":
+            start_date_input = st.sidebar.date_input("Start date", datetime.now() - pd.Timedelta(days=7), key="sidebar_time_filter_start")
+            end_date_input = st.sidebar.date_input("End date", datetime.now(), key="sidebar_time_filter_end")
+            start_date = datetime.combine(start_date_input, datetime.min.time())
+            end_date = datetime.combine(end_date_input, datetime.max.time())
+    
+    # Load the data with the selected multiplier and time filter
+    df, deficit_query = load_data_from_supabase(sales_target_multiplier, start_date, end_date)
+
+    # Show the SQL query used for deficit calculation
+    with st.expander("Show SQL query for Stock Deficit Overview"):
+        st.code(deficit_query, language="sql")
 
     # Check if data was loaded successfully
     if df.empty:
@@ -621,6 +675,7 @@ with tab1:
 
     # Create a note about the multiplier impact
     st.info(t["target_multiplier_info"].format(sales_target_multiplier))
+
 
     # Create warehouse filter
     warehouses = sorted(df['warehouseName'].unique())
@@ -686,6 +741,22 @@ with tab1:
             default=[]
         )
 
+    # Create supplier_article filter (above product filter)
+    supplier_articles = sorted(df['supplierArticle'].dropna().unique())
+    select_all_supplier_articles = st.sidebar.checkbox("Select All Supplier Articles", value=True)
+    if select_all_supplier_articles:
+        selected_supplier_articles = st.sidebar.multiselect(
+            "Select Supplier Articles",
+            options=supplier_articles,
+            default=supplier_articles
+        )
+    else:
+        selected_supplier_articles = st.sidebar.multiselect(
+            "Select Supplier Articles",
+            options=supplier_articles,
+            default=[]
+        )
+
     # Create product filter
     products = sorted(df['nmId'].unique())
     select_all_products = st.sidebar.checkbox(t["select_all_products"], value=True)
@@ -718,37 +789,13 @@ with tab1:
             default=[]
         )
 
-    # Create time filter
-    st.sidebar.header("Time Filter")
-    time_filter_option = st.sidebar.radio(
-        "Select time range",
-        ("Last 1 day", "Last 7 days", "Last 30 days", "Custom Range", "All Time"),
-        index=4
-    )
-
-    start_date = None
-    end_date = None
-
-    if time_filter_option != "All Time":
-        end_date = datetime.now()
-        if time_filter_option == "Last 1 day":
-            start_date = end_date - pd.Timedelta(days=1)
-        elif time_filter_option == "Last 7 days":
-            start_date = end_date - pd.Timedelta(days=7)
-        elif time_filter_option == "Last 30 days":
-            start_date = end_date - pd.Timedelta(days=30)
-        elif time_filter_option == "Custom Range":
-            start_date_input = st.sidebar.date_input("Start date", datetime.now() - pd.Timedelta(days=7))
-            end_date_input = st.sidebar.date_input("End date", datetime.now())
-            start_date = datetime.combine(start_date_input, datetime.min.time())
-            end_date = datetime.combine(end_date_input, datetime.max.time())
-
     # Filter the data based on selections
     filtered_df = df[
         (df['warehouseName'].isin(selected_warehouses)) &
         (df['brand'].isin(selected_brands)) &
         (df['category'].isin(selected_categories)) &
         (df['subject'].isin(selected_subjects)) &
+        (df['supplierArticle'].isin(selected_supplier_articles)) &
         (df['nmId'].isin(selected_products)) &
         (df['techSize'].isin(selected_sizes))
     ]
@@ -783,7 +830,10 @@ with tab1:
     # Detailed data - replaced filtered_df with product_restock data
     st.header(t["detailed_data_header"])
 
-    # Load product_restock data with filters
+    # Show the query for the deficit analysis graph
+    # (already shown above in the expander)
+
+    # Load product_restock data with filters and time filter
     product_restock_data = load_product_restock_data(
         sales_target_multiplier=sales_target_multiplier,
         warehouses=selected_warehouses,
@@ -791,22 +841,27 @@ with tab1:
         categories=selected_categories,
         subjects=selected_subjects,
         products=selected_products,
-        sizes=selected_sizes
+        sizes=selected_sizes,
+        supplier_articles=selected_supplier_articles,
+        start_date=start_date,
+        end_date=end_date
     )
 
     if product_restock_data.empty:
         st.info(t["no_products_matching"])
     else:
+        # Sort by stock_deficit descending before displaying
+        product_restock_data_sorted = product_restock_data.sort_values("stock_deficit", ascending=False)
         st.dataframe(
-            product_restock_data.style.highlight_max(
+            product_restock_data_sorted.style.highlight_max(
                 axis=0, 
-                subset=['stock_deficit', 'sales_last_month', 'in_delivery']
+                subset=['stock_deficit', 'sales_in_period', 'in_delivery']
             ), 
             use_container_width=True
         )
 
         # Optional - download filtered product_restock data
-        csv = product_restock_data.to_csv(index=False)
+        csv = product_restock_data_sorted.to_csv(index=False)
         st.download_button(
             label=t["download_button"],
             data=csv,
@@ -853,11 +908,9 @@ with tab2:
     st.header(t["sales_orders_tab"])
 
     @st.cache_data(ttl=300)  # Cache expires after 5 minutes
-    def load_sales_orders_data():
+    def load_sales_orders_data(start_date=None, end_date=None):
         try:
-            # Get connection parameters from secrets
             db_params = get_db_connection_params()
-            
             conn = psycopg2.connect(
                 host=db_params["host"],
                 database=db_params["database"],
@@ -865,31 +918,35 @@ with tab2:
                 password=db_params["password"],
                 port=db_params["port"]
             )
-            
-            query = """
+            date_filter = ""
+            params = []
+            if start_date and end_date:
+                date_filter = "WHERE summary_date BETWEEN %s AND %s"
+                params = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+            query = f"""
                 SELECT 
-                    CAST(summary_date AS DATE) AS "Date",  -- Ensure Date is treated as date type
+                    CAST(summary_date AS DATE) AS "Date",
                     total_orders AS "Total Orders", 
                     total_sales AS "Total Sales",
-                    sale_order_ratio AS "Sale_Order_Ratio"  -- Added Sale_Order_Ratio
+                    sale_order_ratio AS "Sale_Order_Ratio"
                 FROM belara_gold_marts.daily_sales_orders_summary
+                {date_filter}
                 ORDER BY summary_date DESC
             """
-            
-            # Execute the query and load into DataFrame
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-                cursor.execute(query)
+                cursor.execute(query, params)
                 columns = [desc[0] for desc in cursor.description]
                 data = cursor.fetchall()
                 df = pd.DataFrame(data, columns=columns)
-            
             conn.close()
             return df
         except Exception as e:
             st.error(f"Error loading sales and orders data: {e}")
             return pd.DataFrame(columns=["Date", "Total Orders", "Total Sales", "Sale_Order_Ratio"])
 
-    sales_orders_df = load_sales_orders_data()
+    sales_orders_df = load_sales_orders_data(start_date, end_date)
+    if "Sale_Order_Ratio" in sales_orders_df.columns:
+        sales_orders_df["Sale_Order_Ratio"] = sales_orders_df["Sale_Order_Ratio"].clip(upper=1)
 
     if sales_orders_df.empty:
         st.info("No sales or order data found.")
@@ -1236,11 +1293,10 @@ with tab4:
     st.markdown(t["hero_products_subtitle"])
 
     @st.cache_data(ttl=300)
-    def load_hero_products_data(warehouses=None, brands=None, categories=None, subjects=None):
+    def load_hero_products_data(warehouses=None, brands=None, categories=None, subjects=None, start_date=None, end_date=None):
         try:
             db_params = get_db_connection_params()
             conn = psycopg2.connect(**db_params)
-            
             filter_conditions = []
             if warehouses:
                 warehouse_list = ", ".join([f"'{w.replace("'", "''")}'" for w in warehouses])
@@ -1254,12 +1310,13 @@ with tab4:
             if subjects:
                 subject_list = ", ".join([f"'{s.replace("'", "''")}'" for s in subjects])
                 filter_conditions.append(f"subject IN ({subject_list})")
-
-            # Add date filter for last 90 days
-            filter_conditions.append("last_change_date >= CURRENT_DATE - INTERVAL '90 days'")
-
+            params = []
+            if start_date and end_date:
+                filter_conditions.append("last_change_date BETWEEN %s AND %s")
+                params.extend([start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")])
+            else:
+                filter_conditions.append("last_change_date >= CURRENT_DATE - INTERVAL '90 days'")
             where_clause = " AND ".join(filter_conditions) if filter_conditions else "1=1"
-
             query = f"""
                 SELECT 
                     nm_id AS "nmId",
@@ -1271,48 +1328,61 @@ with tab4:
                 GROUP BY nm_id, supplier_article
                 ORDER BY "salesAmount" DESC
             """
-
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-                cursor.execute(query)
+                cursor.execute(query, params)
                 columns = [desc[0] for desc in cursor.description]
                 data = cursor.fetchall()
                 df = pd.DataFrame(data, columns=columns)
-            
             conn.close()
             return df
         except Exception as e:
             st.error(f"Error loading hero products data: {e}")
             return pd.DataFrame(columns=["nmId", "supplierArticle", "salesAmount", "salesQuantity"])
 
-    # Load hero products data using the filters from the sidebar
+    # Load hero products data using the filters from the sidebar and time filter
     hero_products_df = load_hero_products_data(
         warehouses=selected_warehouses,
         brands=selected_brands,
         categories=selected_categories,
-        subjects=selected_subjects
+        subjects=selected_subjects,
+        start_date=start_date,
+        end_date=end_date
     )
 
     if hero_products_df.empty:
         st.info(t["no_hero_products"])
     else:
-        # Chart: Top 10 Hero Products
+        # Chart: Top 10 Hero Products (Bar: supplierArticle vs salesQuantity, salesAmount as BYN label and tooltip)
         st.subheader(t["top_n_products_chart"].format(10))
-        top_10_hero = hero_products_df.head(10)
+        top_10_hero = hero_products_df.head(10).copy()
+        # Format salesAmount as Belarusian ruble (Br) string for label
+        top_10_hero["salesAmountFormatted"] = top_10_hero["salesAmount"].apply(lambda x: f"Br {x:,.0f}")
         
         fig_hero = px.bar(
             top_10_hero,
-            x="nmId",
-            y="salesAmount",
-            text="salesAmount",
-            hover_data=["supplierArticle", "salesQuantity"],
+            x="supplierArticle",
+            y="salesQuantity",
+            text="salesAmountFormatted",
+            hover_data={
+                "salesAmountFormatted": True,
+                "salesAmount": False,
+                "supplierArticle": False,
+                "salesQuantity": False
+            },
             labels={
-                "nmId": t["product_id"],
-                "salesAmount": t["sales_amount"]
+                "supplierArticle": t["product_id"],
+                "salesQuantity": t["sales_quantity"],
+                "salesAmountFormatted": t["sales_amount"]
             },
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
-        fig_hero.update_traces(texttemplate='%{text:.2s}', textposition='outside')
-        fig_hero.update_layout(uniformtext_minsize=8, uniformtext_mode='hide', xaxis_type='category')
+        fig_hero.update_traces(texttemplate='%{text}', textposition='auto', textangle=0)
+        fig_hero.update_layout(
+            uniformtext_minsize=8,
+            uniformtext_mode='hide',
+            xaxis_type='category',
+            margin=dict(t=60)  # Add top margin to avoid label cutoff
+        )
         st.plotly_chart(fig_hero, use_container_width=True)
 
         # Table: All Hero Products
