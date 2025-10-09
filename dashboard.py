@@ -955,29 +955,62 @@ with tab2:
         sales_orders_df["Date"] = pd.to_datetime(sales_orders_df["Date"])
         sales_orders_df = sales_orders_df.sort_values(by="Date")
 
-        fig = go.Figure()
+        # Combine daily and monthly views into a single chart with a toggle
+        view_option = st.radio("Select View", ["Daily", "Monthly"], horizontal=True)
 
-        fig.add_trace(go.Bar(
-            x=sales_orders_df["Date"],
-            y=sales_orders_df["Total Orders"],
-            name=t.get("total_orders_label", "Total Orders"), # Assuming you'll add this to translations
-            marker_color='lightblue'
-        ))
+        if view_option == "Daily":
+            fig = go.Figure()
 
-        fig.add_trace(go.Bar(
-            x=sales_orders_df["Date"],
-            y=sales_orders_df["Total Sales"],
-            name=t.get("total_sales_label", "Total Sales"), # Assuming you'll add this to translations
-            marker_color='darkblue'
-        ))
+            fig.add_trace(go.Bar(
+                x=sales_orders_df["Date"],
+                y=sales_orders_df["Total Orders"],
+                name=t.get("total_orders_label", "Total Orders"),
+                marker_color='lightblue'
+            ))
 
-        fig.update_layout(
-            barmode='group', # Group bars for orders and sales side-by-side for each date
-            xaxis_title=t.get("date_label", "Date"), # Assuming you'll add this to translations
-            yaxis_title=t.get("count_label", "Count"), # Assuming you'll add this to translations
-            legend_title_text=t.get("legend_title", "Metric") # Assuming you'll add this to translations
-        )
-        
+            fig.add_trace(go.Bar(
+                x=sales_orders_df["Date"],
+                y=sales_orders_df["Total Sales"],
+                name=t.get("total_sales_label", "Total Sales"),
+                marker_color='darkblue'
+            ))
+
+            fig.update_layout(
+                barmode='group',
+                xaxis_title=t.get("date_label", "Date"),
+                yaxis_title=t.get("count_label", "Count"),
+                legend_title_text=t.get("legend_title", "Metric")
+            )
+        else:
+            monthly_sales_orders_df = sales_orders_df.copy()
+            monthly_sales_orders_df["Month"] = monthly_sales_orders_df["Date"].dt.to_period("M").dt.to_timestamp()
+            monthly_summary = monthly_sales_orders_df.groupby("Month").agg(
+                {"Total Orders": "sum", "Total Sales": "sum"}
+            ).reset_index()
+
+            fig = go.Figure()
+
+            fig.add_trace(go.Bar(
+                x=monthly_summary["Month"],
+                y=monthly_summary["Total Orders"],
+                name=t.get("total_orders_label", "Total Orders"),
+                marker_color='lightblue'
+            ))
+
+            fig.add_trace(go.Bar(
+                x=monthly_summary["Month"],
+                y=monthly_summary["Total Sales"],
+                name=t.get("total_sales_label", "Total Sales"),
+                marker_color='darkblue'
+            ))
+
+            fig.update_layout(
+                barmode='group',
+                xaxis_title=t.get("date_label", "Month"),
+                yaxis_title=t.get("count_label", "Count"),
+                legend_title_text=t.get("legend_title", "Metric")
+            )
+
         st.plotly_chart(fig, use_container_width=True)
 
         # Display the dataframe as well, if needed, or remove this line
@@ -987,21 +1020,44 @@ with tab2:
         if "Sale_Order_Ratio" in sales_orders_df.columns:
             st.subheader(t.get("sale_order_ratio_trend_header", "Sale/Order Ratio Trend")) # Placeholder for translation
             
-            fig_ratio = go.Figure()
+            if view_option == "Daily":
+                fig_ratio = go.Figure()
 
-            fig_ratio.add_trace(go.Scatter(
-                x=sales_orders_df["Date"],
-                y=sales_orders_df["Sale_Order_Ratio"],
-                mode='lines+markers',
-                name=t.get("sale_order_ratio_label", "Sale/Order Ratio"), # Placeholder for translation
-                marker_color='green'
-            ))
+                fig_ratio.add_trace(go.Scatter(
+                    x=sales_orders_df["Date"],
+                    y=sales_orders_df["Sale_Order_Ratio"],
+                    mode='lines+markers',
+                    name=t.get("sale_order_ratio_label", "Sale/Order Ratio"),
+                    marker_color='green'
+                ))
 
-            fig_ratio.update_layout(
-                xaxis_title=t.get("date_label", "Date"), # Reusing existing translation
-                yaxis_title=t.get("ratio_label", "Ratio"), # Placeholder for translation
-                legend_title_text=t.get("metric_label", "Metric") # Placeholder for translation
-            )
+                fig_ratio.update_layout(
+                    xaxis_title=t.get("date_label", "Date"),
+                    yaxis_title=t.get("ratio_label", "Ratio"),
+                    legend_title_text=t.get("metric_label", "Metric")
+                )
+            else:
+                monthly_sales_orders_df = sales_orders_df.copy()
+                monthly_sales_orders_df["Month"] = monthly_sales_orders_df["Date"].dt.to_period("M").dt.to_timestamp()
+                monthly_summary = monthly_sales_orders_df.groupby("Month").agg(
+                    {"Sale_Order_Ratio": "mean"}
+                ).reset_index()
+
+                fig_ratio = go.Figure()
+
+                fig_ratio.add_trace(go.Scatter(
+                    x=monthly_summary["Month"],
+                    y=monthly_summary["Sale_Order_Ratio"],
+                    mode='lines+markers',
+                    name=t.get("sale_order_ratio_label", "Sale/Order Ratio"),
+                    marker_color='green'
+                ))
+
+                fig_ratio.update_layout(
+                    xaxis_title=t.get("date_label", "Month"),
+                    yaxis_title=t.get("ratio_label", "Ratio"),
+                    legend_title_text=t.get("metric_label", "Metric")
+                )
             
             st.plotly_chart(fig_ratio, use_container_width=True)
         else:
