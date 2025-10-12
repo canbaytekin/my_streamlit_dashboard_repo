@@ -200,10 +200,39 @@ def get_environment():
                    os.environ.get('IS_STREAMLIT_CLOUD', '') == 'true' or
                    os.environ.get('STREAMLIT_RUNTIME_ENVIRONMENT', '') == 'cloud')
         
-        # Check if HTTPS is enabled by checking the request protocol
-        has_https = (os.environ.get('HTTPS', '') == 'true' or
-                    os.environ.get('STREAMLIT_HOST', '').startswith('https://') or
-                    is_cloud)  # Fallback to is_cloud if other checks fail
+        # Enhanced HTTPS detection with multiple reliable checks
+        # This implementation checks various environment variables and conditions
+        # that different servers and deployment environments might use to indicate HTTPS
+        has_https = (
+            # 1. Standard HTTPS environment variable
+            # Many web servers set HTTPS=true when SSL/TLS is enabled
+            os.environ.get('HTTPS', '').lower() == 'true' or
+
+            # 2. Streamlit-specific host check
+            # Checks if the Streamlit application is being served over HTTPS
+            # by examining the host URL directly
+            os.environ.get('STREAMLIT_HOST', '').startswith('https://') or
+
+            # 3. Server protocol check
+            # Used by web servers (Apache/Nginx) to indicate the protocol
+            # Will be 'HTTPS' if SSL/TLS is enabled
+            os.environ.get('SERVER_PROTOCOL', '').startswith('HTTPS') or
+
+            # 4. Proxy forwarding check
+            # Important for applications behind a proxy/load balancer
+            # The proxy sets this header to indicate the original request protocol
+            os.environ.get('HTTP_X_FORWARDED_PROTO', '') == 'https' or
+
+            # 5. WSGI environment check
+            # Python web frameworks use this to indicate the URL scheme
+            # Will be 'https' if SSL/TLS is enabled
+            os.environ.get('wsgi.url_scheme', '') == 'https' or
+
+            # 6. Streamlit Cloud automatic HTTPS
+            # Assumes HTTPS is enabled on Streamlit Cloud deployments
+            # Can be disabled by setting STREAMLIT_DISABLE_HTTPS=true
+            (is_cloud and not os.environ.get('STREAMLIT_DISABLE_HTTPS', '').lower() == 'true')
+        )
         
         return {
             "is_cloud": is_cloud,
@@ -278,13 +307,15 @@ def check_password():
     if "authenticated_time" not in st.session_state:
         st.session_state.authenticated_time = 0
     
-    # Check for session expiry (5 seconds)
+    # Check for session expiry (30 minutes)
     if st.session_state.get("authenticated"):
-        if time.time() - st.session_state.authenticated_time > 5:  # 5 seconds
+        current_time = time.time()
+        if current_time - st.session_state.authenticated_time > 1800:  # 30 minutes
             st.session_state.authenticated = False
             # Clear URL parameters to ensure proper redirect to login
             st.query_params.clear()
             st.warning("Your session has expired. Please login again.")
+            st.rerun()  # Force rerun to show login page
             return False
         return True
     
@@ -325,6 +356,7 @@ def check_password():
             
             # Set URL parameters for session persistence
             st.query_params["authenticated"] = "true"
+            
             st.query_params["auth_time"] = str(current_time)
             st.rerun()
         else:
@@ -393,6 +425,22 @@ if not check_password():
 
 # If we reach here, user is authenticated - show the dashboard
 logout()  # Add logout button to sidebar
+
+# Auto-refresh setup
+refresh_interval = 6  # seconds
+
+# Initialize refresh state variables if they don't exist
+if "refresh_counter" not in st.session_state:
+    st.session_state.refresh_counter = 0
+    st.session_state.last_refresh = time.time()
+
+# Check if refresh interval has elapsed and trigger rerun
+current_time = time.time()
+if current_time - st.session_state.last_refresh >= refresh_interval:
+    st.session_state.refresh_counter += 1
+    st.session_state.last_refresh = current_time
+    time.sleep(0.1)  # Small delay to ensure state is saved
+    st.rerun()
 
 # Supabase connection parameters from Streamlit secrets
 @st.cache_resource
@@ -498,31 +546,6 @@ with tab1:
         else:
             st.session_state["last_refresh_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.info(t["last_refresh"].format(st.session_state["last_refresh_time"]))
-
-    # Add auto-refresh option
-    with refresh_col2:
-        auto_refresh = st.checkbox("Auto-refresh every 5 minutes", value=False)
-        if auto_refresh:
-                    # Add auto-refresh - using JavaScript in cloud for better control
-            if ENVIRONMENT["is_cloud"]:
-                st.markdown("""
-                    <script>
-                    function refreshPage() {
-                        window.location.reload();
-                    }
-                    setTimeout(refreshPage, 300000);
-                    </script>
-                """, unsafe_allow_html=True)
-            else:
-                # Fallback to meta refresh for local development
-                refresh_rate = 300  # 5 minutes in seconds
-                st.markdown(f"""
-                    <meta http-equiv="refresh" content="{refresh_rate}">
-                """, unsafe_allow_html=True)
-            if "last_auto_refresh" not in st.session_state or \
-               (datetime.now() - datetime.strptime(st.session_state["last_auto_refresh"], "%Y-%m-%d %H:%M:%S")).total_seconds() > refresh_rate:
-                st.session_state["last_auto_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                st.cache_data.clear()
 
     # Create sidebar filters
     st.sidebar.header(t["filters_header"])
