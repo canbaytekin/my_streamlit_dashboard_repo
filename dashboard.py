@@ -228,10 +228,17 @@ def get_environment():
             # Will be 'https' if SSL/TLS is enabled
             os.environ.get('wsgi.url_scheme', '') == 'https' or
 
-            # 6. Streamlit Cloud automatic HTTPS
-            # Assumes HTTPS is enabled on Streamlit Cloud deployments
-            # Can be disabled by setting STREAMLIT_DISABLE_HTTPS=true
-            (is_cloud and not os.environ.get('STREAMLIT_DISABLE_HTTPS', '').lower() == 'true')
+            # 6. Streamlit Cloud automatic HTTPS detection
+            # All Streamlit Cloud deployments use HTTPS by default
+            is_cloud or
+            
+            # 7. Cloud-specific protocol checks
+            os.environ.get('SERVER_PROTOCOL', '').lower() == 'https' or
+            os.environ.get('STREAMLIT_DEPLOYED', '').lower() == 'true' or
+            os.environ.get('STREAMLIT_CLOUD', '').lower() == 'true' or
+            
+            # 8. Check if the app is running on a secure domain
+            os.environ.get('STREAMLIT_HOST', '').startswith('https://streamlit.app')
         )
         
         return {
@@ -295,8 +302,8 @@ def check_password():
             auth_time = params.get("auth_time", str(time.time()))
             st.session_state.authenticated_time = float(auth_time)
             
-            # Add warning if HTTPS is not available
-            if not ENVIRONMENT["is_cloud"] or not ENVIRONMENT["has_https"]:
+            # Add warning only in local development environment
+            if not ENVIRONMENT["has_https"] and not ENVIRONMENT["is_cloud"]:
                 st.warning("⚠️ For maximum security, deploy this dashboard on Streamlit Cloud where HTTPS is enabled.")
     
     # Initialize session state variables if they don't exist
@@ -350,8 +357,8 @@ def check_password():
             st.session_state.authenticated_time = current_time
             st.session_state.login_attempts = 0
             
-            # Check HTTPS status and show warning if needed
-            if not ENVIRONMENT["is_cloud"] or not ENVIRONMENT["has_https"]:
+            # Add warning only in local development environment
+            if not ENVIRONMENT["has_https"] and not ENVIRONMENT["is_cloud"]:
                 st.warning("⚠️ For maximum security, deploy this dashboard on Streamlit Cloud where HTTPS is enabled.")
             
             # Set URL parameters for session persistence
