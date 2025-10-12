@@ -200,9 +200,14 @@ def get_environment():
                    os.environ.get('IS_STREAMLIT_CLOUD', '') == 'true' or
                    os.environ.get('STREAMLIT_RUNTIME_ENVIRONMENT', '') == 'cloud')
         
+        # Check if HTTPS is enabled by checking the request protocol
+        has_https = (os.environ.get('HTTPS', '') == 'true' or
+                    os.environ.get('STREAMLIT_HOST', '').startswith('https://') or
+                    is_cloud)  # Fallback to is_cloud if other checks fail
+        
         return {
             "is_cloud": is_cloud,
-            "has_https": is_cloud  # Streamlit Cloud always has HTTPS
+            "has_https": has_https
         }
     except Exception as e:
         st.error(f"Environment detection error: {e}")
@@ -311,6 +316,10 @@ def check_password():
             current_time = time.time()
             st.session_state.authenticated_time = current_time
             st.session_state.login_attempts = 0
+            
+            # Check HTTPS status and show warning if needed
+            if not ENVIRONMENT["has_https"]:
+                st.warning("⚠️ For maximum security, deploy this dashboard on Streamlit Cloud where HTTPS is enabled.")
             
             # Set URL parameters for session persistence
             st.query_params["authenticated"] = "true"
