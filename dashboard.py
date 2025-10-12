@@ -195,12 +195,17 @@ def get_environment():
             - has_https: bool, True if HTTPS is available
     """
     try:
-        is_cloud = st.secrets.get("STREAMLIT_CLOUD", False)
+        # Better cloud deployment detection - check multiple environment indicators
+        is_cloud = (os.environ.get('STREAMLIT_SHARING', '') == 'true' or 
+                   os.environ.get('IS_STREAMLIT_CLOUD', '') == 'true' or
+                   os.environ.get('STREAMLIT_RUNTIME_ENVIRONMENT', '') == 'cloud')
+        
         return {
             "is_cloud": is_cloud,
             "has_https": is_cloud  # Streamlit Cloud always has HTTPS
         }
-    except:
+    except Exception as e:
+        st.error(f"Environment detection error: {e}")
         return {
             "is_cloud": False,
             "has_https": False
