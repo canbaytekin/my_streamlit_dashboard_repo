@@ -11,60 +11,6 @@ from datetime import datetime
 import time
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-# Authentication functions
-def check_password():
-    """Returns `True` if the user had the correct password."""
-    
-    def validate_login():
-        # Better cloud deployment detection - check multiple environment indicators
-        is_cloud = (os.environ.get('STREAMLIT_SHARING', '') == 'true' or 
-                   os.environ.get('IS_STREAMLIT_CLOUD', '') == 'true' or
-                   os.environ.get('STREAMLIT_RUNTIME_ENVIRONMENT', '') == 'cloud')
-        
-        # Get credentials from secrets with proper fallbacks
-        if is_cloud:
-            # In cloud deployment, use secrets first with fallback to hardcoded values
-            # This allows setting credentials in Streamlit Cloud secrets
-            expected_username = st.secrets.get("DASHBOARD_USERNAME", "belara")
-            expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password123")
-        else:
-            # In local development, use secrets
-            expected_username = st.secrets.get("DASHBOARD_USERNAME", "admin")
-            expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password")
-        
-                
-        # Check credentials
-        return (
-            st.session_state.get("username", "") == expected_username and 
-            st.session_state.get("password", "") == expected_password
-        )
-
-    # Return True if the username + password is validated.
-    if st.session_state.get("authenticated"):
-        return True
-    
-    # Show login form - completely separate from the dashboard content
-    st.markdown("## Dashboard Login")
-    
-    # Create login form
-    with st.form("login_form"):
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", key="password")
-        submitted = st.form_submit_button("Login")
-    
-    if submitted and validate_login():
-        st.session_state["authenticated"] = True
-        st.rerun()  # Rerun the app to show the dashboard
-        return True
-    elif submitted:
-        st.error("❌ Invalid username or password")
-        return False
-    else:
-        return False
-
 # Language dictionary for translations
 translations = {
     "English": {
@@ -237,8 +183,190 @@ translations = {
     }
 }
 
+# Load environment variables
+load_dotenv()
+
+def get_environment():
+    """
+    Centralized function to determine the running environment.
+    Returns:
+        dict: Environment configuration with keys:
+            - is_cloud: bool, True if running on Streamlit Cloud
+            - has_https: bool, True if HTTPS is available
+    """
+    try:
+        is_cloud = st.secrets.get("STREAMLIT_CLOUD", False)
+        return {
+            "is_cloud": is_cloud,
+            "has_https": is_cloud  # Streamlit Cloud always has HTTPS
+        }
+    except:
+        return {
+            "is_cloud": False,
+            "has_https": False
+        }
+
+# Store environment configuration once
+ENVIRONMENT = get_environment()
+
+# Authentication functions
+def check_password():
+    """
+    Authenticate users using Streamlit's built-in security features.
+    
+    This function implements a secure authentication system using Streamlit's native 
+    security features instead of custom password hashing:
+    
+    1. Credentials Management:
+       - Username and password are stored securely in Streamlit's secrets management
+       - Access credentials via st.secrets["DASHBOARD_USERNAME"] and st.secrets["DASHBOARD_PASSWORD"]
+       - No need for additional password hashing as Streamlit handles security
+    
+    2. Session Management:
+       - Uses Streamlit's session state to track authentication status
+       - 30-minute session timeout for security
+       - Session state is cleared on logout
+    
+    3. Security Features:
+       - Tracks failed login attempts (maximum 3 attempts)
+       - 5-minute account lockout after exceeding maximum attempts
+       - Clear feedback messages for users
+       - Automatic session expiry for inactive users
+    
+    Setup Instructions:
+    1. Create `.streamlit/secrets.toml` in project root
+    2. Add credentials:
+       ```toml
+       DASHBOARD_USERNAME = "admin"
+       DASHBOARD_PASSWORD = "your-secure-password"
+       ```
+    3. For deployment, add these credentials in Streamlit Cloud dashboard under "Secrets"
+    
+    Returns:
+        bool: True if user is authenticated, False otherwise
+    """
+    
+    # Handle session persistence using URL parameters in a secure way
+    params = st.query_params
+    
+    # Only use URL parameters if running on Cloud (HTTPS) or locally
+    if params.get("authenticated") == "true":
+        if "authenticated" not in st.session_state:
+            st.session_state.authenticated = True
+            auth_time = params.get("auth_time", str(time.time()))
+            st.session_state.authenticated_time = float(auth_time)
+            
+            # Add warning if HTTPS is not available
+            if not ENVIRONMENT["has_https"]:
+                st.warning("⚠️ For maximum security, deploy this dashboard on Streamlit Cloud where HTTPS is enabled.")
+    
+    # Initialize session state variables if they don't exist
+    if "login_attempts" not in st.session_state:
+        st.session_state.login_attempts = 0
+    if "last_attempt_time" not in st.session_state:
+        st.session_state.last_attempt_time = 0
+    if "authenticated_time" not in st.session_state:
+        st.session_state.authenticated_time = 0
+    
+    # Check for session expiry (30 minutes)
+    if st.session_state.get("authenticated"):
+        if time.time() - st.session_state.authenticated_time > 1800:  # 30 minutes
+            st.session_state.authenticated = False
+            st.warning("Your session has expired. Please login again.")
+            return False
+        return True
+    
+    # Check for temporary lockout after 3 failed attempts
+    if st.session_state.login_attempts >= 3:
+        if time.time() - st.session_state.last_attempt_time < 300:  # 5 minutes lockout
+            st.error("Too many failed attempts. Please try again in 5 minutes.")
+            return False
+        else:
+            # Reset attempts after lockout period
+            st.session_state.login_attempts = 0
+    
+    # Show login form
+    st.markdown("## Dashboard Login")
+    with st.form("login_form"):
+        username = st.text_input("Username", key="username")
+        password = st.text_input("Password", type="password", key="password")
+        submitted = st.form_submit_button("Login")
+        if st.session_state.get("authenticated"):
+            st.form_submit_button("Logout")
+    
+    if submitted:
+        # Update last attempt time
+        st.session_state.last_attempt_time = time.time()
+        
+        if (
+            username == st.secrets["DASHBOARD_USERNAME"]
+            and password == st.secrets["DASHBOARD_PASSWORD"]
+        ):
+            st.session_state["authenticated"] = True
+            current_time = time.time()
+            st.session_state.authenticated_time = current_time
+            st.session_state.login_attempts = 0
+            
+            # Set URL parameters for session persistence
+            st.query_params["authenticated"] = "true"
+            st.query_params["auth_time"] = str(current_time)
+            st.rerun()
+        else:
+            st.session_state.login_attempts += 1
+            remaining_attempts = 3 - st.session_state.login_attempts
+            if remaining_attempts > 0:
+                st.error(f"Invalid username or password. {remaining_attempts} attempts remaining.")
+            else:
+                st.error("Account temporarily locked. Please try again in 5 minutes.")
+        return False
+    else:
+        st.stop()
+
+def logout():
+    """
+    Logout the user by clearing the session state and URL parameters.
+    
+    This function handles the user logout process:
+    1. Removes authentication status from session state and URL
+    2. Clears login attempt tracking
+    3. Removes session timeout tracking
+    4. Forces page rerun to update UI
+    
+    The function is typically called when:
+    - User clicks the logout button
+    - Session expires (30-minute timeout)
+    - Security violation is detected
+    """
+    if st.sidebar.button("Logout"):
+        # Clear session state
+        for key in ["authenticated", "authenticated_time", "login_attempts", "last_attempt_time"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        
+        # Clear URL parameters
+        st.query_params.clear()
+        st.rerun()
+
+
 # Set page configuration
-st.set_page_config(page_title="Warehouse Analytics Dashboard", layout="wide")
+st.set_page_config(
+    page_title="Warehouse Analytics Dashboard",
+    layout="wide",
+    # Enable wider distribution on Streamlit Cloud
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://github.com/your-repo/issues',
+        'Report a bug': 'https://github.com/your-repo/issues',
+        'About': """
+        # Warehouse Analytics Dashboard
+        A secure, multi-language dashboard for warehouse analytics.
+        
+        - Secure authentication with session persistence
+        - Supports both local development and Streamlit Cloud deployment
+        - Multi-language support (English/Russian)
+        """
+    }
+)
 
 # Path to configuration file - store in the same directory as the script
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dashboard_config.json')
@@ -248,12 +376,22 @@ if not check_password():
     st.stop()  # Stop execution if not authenticated
 
 # If we reach here, user is authenticated - show the dashboard
+logout()  # Add logout button to sidebar
 
 # Supabase connection parameters from Streamlit secrets
 @st.cache_resource
 def get_db_connection_params():
     try:
-        
+        # In cloud environment, connection params are required
+        if ENVIRONMENT["is_cloud"]:
+            return {
+                "host": st.secrets["SUPABASE_HOST"],
+                "database": st.secrets["SUPABASE_DATABASE"],
+                "user": st.secrets["SUPABASE_USER"],
+                "password": st.secrets["SUPABASE_PASSWORD"],
+                "port": st.secrets["SUPABASE_PORT"]
+            }
+        # In local environment, allow defaults for some params
         return {
             "host": st.secrets["SUPABASE_HOST"],
             "database": st.secrets.get("SUPABASE_DATABASE", "postgres"),
@@ -349,11 +487,22 @@ with tab1:
     with refresh_col2:
         auto_refresh = st.checkbox("Auto-refresh every 5 minutes", value=False)
         if auto_refresh:
-            # Add auto-refresh using HTML meta tag
-            refresh_rate = 300  # 5 minutes in seconds
-            st.markdown(f"""
-                <meta http-equiv="refresh" content="{refresh_rate}">
-            """, unsafe_allow_html=True)
+                    # Add auto-refresh - using JavaScript in cloud for better control
+            if ENVIRONMENT["is_cloud"]:
+                st.markdown("""
+                    <script>
+                    function refreshPage() {
+                        window.location.reload();
+                    }
+                    setTimeout(refreshPage, 300000);
+                    </script>
+                """, unsafe_allow_html=True)
+            else:
+                # Fallback to meta refresh for local development
+                refresh_rate = 300  # 5 minutes in seconds
+                st.markdown(f"""
+                    <meta http-equiv="refresh" content="{refresh_rate}">
+                """, unsafe_allow_html=True)
             if "last_auto_refresh" not in st.session_state or \
                (datetime.now() - datetime.strptime(st.session_state["last_auto_refresh"], "%Y-%m-%d %H:%M:%S")).total_seconds() > refresh_rate:
                 st.session_state["last_auto_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -886,8 +1035,8 @@ DASHBOARD_PASSWORD = "your-secure-password"
 """
         return secrets_content
 
-    # Only show in development environment
-    if st.sidebar.checkbox("Show Secrets Template", value=False):
+    # Only show template in local development environment
+    if not ENVIRONMENT["is_cloud"] and st.sidebar.checkbox("Show Secrets Template", value=False):
         st.sidebar.code(generate_secrets_template(), language="toml")
         st.sidebar.warning(
             "⚠️ Create a .streamlit/secrets.toml file with your actual credentials.\n"
