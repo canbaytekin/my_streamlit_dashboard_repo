@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import numpy as np
 import psycopg2
 import psycopg2.extras
 import os
@@ -10,10 +9,7 @@ import sys
 import json
 from datetime import datetime
 import time
-import glob
-import re
 from dotenv import load_dotenv
-import hashlib
 
 # Load environment variables
 load_dotenv()
@@ -39,11 +35,7 @@ def check_password():
             expected_username = st.secrets.get("DASHBOARD_USERNAME", "admin")
             expected_password = st.secrets.get("DASHBOARD_PASSWORD", "password")
         
-        # Debug info (remove in production)
-        print(f"Is cloud deployment: {is_cloud}")
-        print(f"Expected username: {expected_username}")
-        print(f"Entered username: {st.session_state.get('username', '')}")
-        
+                
         # Check credentials
         return (
             st.session_state.get("username", "") == expected_username and 
@@ -261,8 +253,6 @@ if not check_password():
 @st.cache_resource
 def get_db_connection_params():
     try:
-        # Print available secrets keys for debugging (remove in production)
-        print("Available secrets keys:", list(st.secrets.keys()))
         
         return {
             "host": st.secrets["SUPABASE_HOST"],
