@@ -278,10 +278,12 @@ def check_password():
     if "authenticated_time" not in st.session_state:
         st.session_state.authenticated_time = 0
     
-    # Check for session expiry (30 minutes)
+    # Check for session expiry (5 seconds)
     if st.session_state.get("authenticated"):
-        if time.time() - st.session_state.authenticated_time > 1800:  # 30 minutes
+        if time.time() - st.session_state.authenticated_time > 5:  # 5 seconds
             st.session_state.authenticated = False
+            # Clear URL parameters to ensure proper redirect to login
+            st.query_params.clear()
             st.warning("Your session has expired. Please login again.")
             return False
         return True
