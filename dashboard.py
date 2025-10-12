@@ -296,7 +296,7 @@ def check_password():
             st.session_state.authenticated_time = float(auth_time)
             
             # Add warning if HTTPS is not available
-            if not ENVIRONMENT["has_https"]:
+            if not ENVIRONMENT["is_cloud"]:
                 st.warning("⚠️ For maximum security, deploy this dashboard on Streamlit Cloud where HTTPS is enabled.")
     
     # Initialize session state variables if they don't exist
@@ -351,7 +351,7 @@ def check_password():
             st.session_state.login_attempts = 0
             
             # Check HTTPS status and show warning if needed
-            if not ENVIRONMENT["has_https"]:
+            if not ENVIRONMENT["is_cloud"]:
                 st.warning("⚠️ For maximum security, deploy this dashboard on Streamlit Cloud where HTTPS is enabled.")
             
             # Set URL parameters for session persistence
